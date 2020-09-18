@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"k8s.io/kops/upup/pkg/fi"
@@ -289,8 +290,7 @@ func (t *LaunchTemplate) Find(c *fi.Context) (*LaunchTemplate, error) {
 	return actual, nil
 }
 
-// findAllLaunchTemplates returns all the launch templates for us
-func (t *LaunchTemplate) findAllLaunchTemplates(c *fi.Context) ([]*ec2.LaunchTemplate, error) {
+func findAllLaunchTemplatesImpl(c *fi.Context) ([]*ec2.LaunchTemplate, error) {
 	var list []*ec2.LaunchTemplate
 
 	cloud := c.Cloud.(awsup.AWSCloud)
@@ -312,8 +312,21 @@ func (t *LaunchTemplate) findAllLaunchTemplates(c *fi.Context) ([]*ec2.LaunchTem
 	}
 }
 
+var mutex sync.Mutex
+var templatesCache []*ec2.LaunchTemplate
+var templatesVersionsCache []*ec2.LaunchTemplateVersion
+
 // findAllLaunchTemplateVersions returns all the launch templates versions for us
 func (t *LaunchTemplate) findAllLaunchTemplatesVersions(c *fi.Context) ([]*ec2.LaunchTemplateVersion, error) {
+	mutex.Lock()
+	if templatesVersionsCache == nil {
+		templatesVersionsCache, _ = findAllLaunchTemplatesVersionsImpl(c)
+	}
+	mutex.Unlock()
+	return templatesVersionsCache, nil
+}
+
+func findAllLaunchTemplatesVersionsImpl(c *fi.Context) ([]*ec2.LaunchTemplateVersion, error) {
 	var list []*ec2.LaunchTemplateVersion
 
 	cloud, ok := c.Cloud.(awsup.AWSCloud)
@@ -321,7 +334,7 @@ func (t *LaunchTemplate) findAllLaunchTemplatesVersions(c *fi.Context) ([]*ec2.L
 		return []*ec2.LaunchTemplateVersion{}, fmt.Errorf("invalid cloud provider: %v, expected: awsup.AWSCloud", c.Cloud)
 	}
 
-	templates, err := t.findAllLaunchTemplates(c)
+	templates, err := findAllLaunchTemplatesImpl(c)
 	if err != nil {
 		return nil, err
 	}
